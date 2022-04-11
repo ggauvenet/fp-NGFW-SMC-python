@@ -1206,6 +1206,115 @@ class MasterEngineCluster(Engine):
     typeof = "master_engine"
 
     @classmethod
+    def create_bulk(
+        cls,
+        name,
+        interfaces=None,
+        nodes=2,
+        master_type="firewall",
+        cluster_mode="balancing",
+        primary_mgt=None,
+        backup_mgt=None,
+        primary_heartbeat=None,
+        backup_heartbeat=None,
+        log_server_ref=None,
+        domain_server_address=None,
+        location_ref=None,
+        default_nat=False,
+        enable_antivirus=False,
+        enable_gti=False,
+        comment=None,
+        snmp=None,
+        ntp_settings=None,
+        timezone=None,
+        extra_opts=None,
+        lldp_profile=None,
+        **kw
+    ):
+        """
+        Create bulk is called by the `create` constructor when creating a cluster engine.
+        This allows for multiple interfaces to be defined and passed in during element
+        creation.
+
+        :param dict snmp: SNMP dict should have keys `snmp_agent` str defining name of SNMPAgent,
+            `snmp_interface` which is a list of interface IDs, and optionally `snmp_location` which
+            is a string with the SNMP location name.
+        """
+        primary_heartbeat = primary_mgt if not primary_heartbeat else primary_heartbeat
+
+        physical_interfaces = []
+        for interface in interfaces:
+            if "interface_id" not in interface:
+                raise CreateEngineFailed(
+                    "Interface definitions must contain the interface_id "
+                    "field. Failed to create engine: %s" % name
+                )
+            if interface.get("type", None) == "tunnel_interface":
+                tunnel_interface = TunnelInterface(**interface)
+                physical_interfaces.append({"tunnel_interface": tunnel_interface})
+            else:
+                cluster_interface = Layer3PhysicalInterface(
+                    primary_mgt=primary_mgt,
+                    backup_mgt=backup_mgt,
+                    primary_heartbeat=primary_heartbeat,
+                    backup_heartbeat=backup_heartbeat,
+                    **interface
+                )
+                physical_interfaces.append({"physical_interface": cluster_interface})
+
+        if snmp:
+            snmp_agent = dict(
+                snmp_agent_ref=snmp.get("snmp_agent", ""),
+                snmp_location=snmp.get("snmp_location", ""),
+            )
+
+            snmp_agent.update(snmp_interface=add_snmp(interfaces, snmp.get("snmp_interface", [])))
+
+        # convert ntp_settings from extra_opts to parameter for _create function
+        if extra_opts is not None and "ntp_settings" in extra_opts:
+            ntp_settings = extra_opts['ntp_settings']
+            del extra_opts['ntp_settings']
+
+        # convert timezone from extra_opts to parameter for _create function
+        if extra_opts is not None and "timezone" in extra_opts:
+            timezone = extra_opts['timezone']
+            del extra_opts['timezone']
+
+        # convert lldp_profile_ref from extra_opts to parameter for _create function
+        if extra_opts is not None and "lldp_profile_ref" in extra_opts:
+            lldp_profile = extra_opts['lldp_profile_res']
+            del extra_opts['lldp_profile_ref']
+
+        try:
+            engine = super(MasterEngineCluster, cls)._create(
+                name=name,
+                node_type="master_node",
+                physical_interfaces=physical_interfaces,
+                domain_server_address=domain_server_address,
+                log_server_ref=log_server_ref,
+                location_ref=location_ref,
+                enable_gti=enable_gti,
+                nodes=nodes,
+                enable_antivirus=enable_antivirus,
+                default_nat=default_nat,
+                snmp_agent=snmp_agent if snmp else None,
+                ntp_settings=ntp_settings,
+                comment=comment,
+                timezone=timezone,
+                lldp_profile=lldp_profile,
+                ** extra_opts if extra_opts else {},
+            )
+            engine.update(master_type=master_type, cluster_mode="standby")
+            #engine.update(cluster_mode=cluster_mode)
+
+            return ElementCreator(cls, json=engine)
+
+        except (ElementNotFound, CreateElementFailed) as e:
+            raise CreateEngineFailed(e)
+
+
+
+    @classmethod
     def create(
         cls,
         name,
